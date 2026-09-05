@@ -3,13 +3,43 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function POST(req: Request) {
   let rawBody: any = null;
+  
   try {
-    rawBody = await req.json();
-    let { customerName, phone, address, items, paymentMethod } = rawBody;
+    // 1. Güvenli Body Okuma
+    try {
+      rawBody = await req.json();
+    } catch (parseError) {
+      // Eğer doğrudan JSON değilse, text olarak alıp parse etmeyi deneriz
+      const textBody = await req.text();
+      try {
+        rawBody = JSON.parse(textBody);
+      } catch (e) {
+        console.warn('Supsis webhook gövdesi JSON olarak okunamadı. Gelen ham metin:', textBody);
+        return NextResponse.json({ success: false, error: 'Invalid JSON payload' }, { status: 400, headers: corsHeaders });
+      }
+    }
 
-    // 1. Eğer items string olarak gelmişse array'e çevir
+    let { customerName, phone, address, items, paymentMethod } = rawBody || {};
+
+    // 2. Parametre Normalizasyonu
+    customerName = customerName ? String(customerName).trim() : 'Sipariş Müşterisi';
+    phone = phone ? String(phone).trim() : '';
+    address = address ? String(address).trim() : 'Adres belirtilmemiş';
+    paymentMethod = paymentMethod ? String(paymentMethod).trim() : 'KAPIDA_ODEME';
+
+    // 3. Items Normalizasyonu
     if (typeof items === 'string') {
       try {
         items = JSON.parse(items);
@@ -18,13 +48,12 @@ export async function POST(req: Request) {
       }
     }
 
-    // Validate payload
-    if (!customerName || !phone || !items || !Array.isArray(items) || items.length === 0) {
+    if (!phone || !items || !Array.isArray(items) || items.length === 0) {
       console.warn('Eksik parametreler:', { customerName, phone, itemsType: typeof items, rawBody });
-      return NextResponse.json({ error: 'Eksik veya hatalı parametreler gönderildi.' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Eksik veya hatalı parametreler gönderildi (phone ve items zorunludur).' }, { status: 400, headers: corsHeaders });
     }
 
-    // ... (Kalan kısımlar aşağıda değişmeden kalacak)
+    // 4. Kullanıcı Eşleştirme veya Oluşturma
     let user = await prisma.user.findUnique({ where: { phone } });
     
     if (!user) {
@@ -40,11 +69,13 @@ export async function POST(req: Request) {
       });
     }
 
+    // 5. Ürünleri İşleme ve Toplam Hesaplama
     const orderItemsToCreate: Array<{ productId: string; quantity: number; price: number }> = [];
     let totalAmount = 0;
 
     for (const item of items) {
-      let rawCode = item.productCode;
+      // productCode normalizasyonu ( ["PRD-xxx"] -> PRD-xxx )
+      let rawCode = item.productCode || item.code;
       
       if (typeof rawCode === 'string' && rawCode.trim().startsWith('[')) {
         try {
@@ -52,6 +83,7 @@ export async function POST(req: Request) {
           if (Array.isArray(parsed)) rawCode = parsed[0];
         } catch (e) {}
       }
+      
       if (Array.isArray(rawCode)) {
         rawCode = rawCode[0];
       }
@@ -59,14 +91,16 @@ export async function POST(req: Request) {
       const cleanCode = String(rawCode || '').replace(/[\[\]"']/g, '').trim().toUpperCase();
       const quantity = Number(item.quantity) || 1;
 
+      if (!cleanCode) continue;
+
       const product = await prisma.product.findUnique({ where: { code: cleanCode } });
       
       if (!product) {
-        return NextResponse.json({ error: `${cleanCode} kodlu ürün bulunamadı.` }, { status: 404 });
+        return NextResponse.json({ success: false, error: `${cleanCode} kodlu ürün bulunamadı.` }, { status: 404, headers: corsHeaders });
       }
 
       if (product.stock < quantity) {
-        return NextResponse.json({ error: `${product.name} için yeterli stok yok. Kalan stok: ${product.stock}` }, { status: 400 });
+        return NextResponse.json({ success: false, error: `${product.name} için yeterli stok yok. Kalan stok: ${product.stock}` }, { status: 400, headers: corsHeaders });
       }
 
       orderItemsToCreate.push({
@@ -78,8 +112,13 @@ export async function POST(req: Request) {
       totalAmount += (product.price * quantity);
     }
 
+    if (orderItemsToCreate.length === 0) {
+      return NextResponse.json({ success: false, error: 'Siparişe eklenecek geçerli ürün bulunamadı.' }, { status: 400, headers: corsHeaders });
+    }
+
     const orderNumber = `ORD-SUP-${Date.now().toString().slice(-6)}`;
 
+    // 6. Sipariş ve Stok Güncelleme (Transaction)
     const order = await prisma.$transaction(async (tx) => {
       const newOrder = await tx.order.create({
         data: {
@@ -87,19 +126,17 @@ export async function POST(req: Request) {
           userId: user.id,
           totalAmount,
           status: 'YENI',
-          paymentMethod: paymentMethod || 'KAPIDA_ODEME',
-          address: address || user.address || 'Adres belirtilmemiş',
+          paymentMethod,
+          address: address !== 'Adres belirtilmemiş' ? address : (user.address || 'Adres belirtilmemiş'),
           phone,
           customerName,
           orderItems: {
             create: orderItemsToCreate
           }
-        },
-        include: {
-          orderItems: true
         }
       });
 
+      // Stokları düş
       for (const item of orderItemsToCreate) {
         await tx.product.update({
           where: { id: item.productId },
@@ -112,16 +149,19 @@ export async function POST(req: Request) {
 
     console.log(`🤖 SUPSIS WEBHOOK İLE SİPARİŞ ALINDI: ${orderNumber}`);
 
+    // 7. Başarılı Yanıt (200 OK)
     return NextResponse.json({
-      status: 'success',
-      message: 'Sipariş başarıyla oluşturuldu.',
-      orderNumber: order.orderNumber,
-      totalAmount: order.totalAmount
-    }, { status: 201 });
+      success: true,
+      message: "Order created successfully",
+      orderNumber: order.orderNumber
+    }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
     console.error('❌ Supsis Order Webhook Error:', error);
     console.error('📦 Gelen Ham Payload:', rawBody);
-    return NextResponse.json({ error: 'Sipariş işlenirken bir hata oluştu.', details: error.message }, { status: 500 });
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || 'Bilinmeyen bir hata oluştu.' 
+    }, { status: 500, headers: corsHeaders });
   }
 }
