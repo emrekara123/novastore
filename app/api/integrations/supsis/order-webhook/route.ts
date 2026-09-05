@@ -38,7 +38,7 @@ export async function POST(req: Request) {
     customerName = customerName ? String(customerName).trim() : 'Supsis Müşterisi';
     phone = phone ? String(phone).trim() : '05555555555';
     address = address ? String(address).trim() : 'Adres Girilmedi';
-    paymentMethod = paymentMethod ? String(paymentMethod).trim() : 'KAPIDA_ODEME';
+    paymentMethod = paymentMethod ? String(paymentMethod).trim() : 'Kapıda Ödeme (Nakit/Kart)';
     // latitude / longitude ignored/saved as part of notes if needed, but not in schema so just ignored safely
 
     // 3. Items Normalizasyonu

@@ -43,7 +43,7 @@ model Order {
   user          User        @relation(fields: [userId], references: [id])
   totalAmount   Float
   status        String      @default("YENI")
-  paymentMethod String
+  paymentMethod String      @default("Kapıda Ödeme (Nakit/Kart)")
   address       String
   phone         String
   customerName  String
