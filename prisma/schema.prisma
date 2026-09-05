@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  phone     String   @unique
+  password  String
+  role      String   @default("CUSTOMER")
+  address   String?
+  city      String?
+  orders    Order[]
+  carts     Cart[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  name        String
+  description String
+  price       Float
+  stock       Int
+  category    String
+  image       String
+  orderItems  OrderItem[]
+  cartItems   CartItem[]
+  createdAt   DateTime    @default(now())
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  orderNumber   String      @unique
+  userId        String
+  user          User        @relation(fields: [userId], references: [id])
+  totalAmount   Float
+  status        String      @default("YENI")
+  paymentMethod String
+  address       String
+  phone         String
+  customerName  String
+  orderItems    OrderItem[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
+}
+
+model Cart {
+  id        String     @id @default(cuid())
+  sessionId String     @unique
+  userId    String?
+  user      User?      @relation(fields: [userId], references: [id])
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model CartItem {
+  id        String  @id @default(cuid())
+  cartId    String
+  cart      Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+
+  @@unique([cartId, productId])
+}
+
