@@ -139,11 +139,37 @@ export default function OrdersPage() {
                 </ul>
               </div>
               
-              {/* Delivery Info */}
+              {/* Delivery Info and Cargo Status */}
               <div className="bg-slate-800/30 px-4 py-4 sm:px-6 border-t border-slate-800">
-                <h4 className="text-sm font-medium text-white mb-2">Teslimat Bilgileri</h4>
-                <p className="text-sm text-slate-400">{order.customerName} - {order.phone}</p>
-                <p className="text-sm text-slate-400 mt-1">{order.address}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h4 className="text-sm font-medium text-white mb-2">Teslimat Bilgileri</h4>
+                    <p className="text-sm text-slate-400">{order.customerName} - {order.phone}</p>
+                    <p className="text-sm text-slate-400 mt-1">{order.address}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-white mb-2">Kargo Takip Durumu</h4>
+                    <div className="flex items-center">
+                      {order.status === 'YENI' || order.status === 'HAZIRLANIYOR' ? (
+                        <div className="bg-blue-900/30 border border-blue-800/50 text-blue-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">📦</span> Siparişiniz onaylandı, depoda paketleme sırasına alındı.
+                        </div>
+                      ) : order.status === 'KARGODA' ? (
+                        <div className="bg-indigo-900/30 border border-indigo-800/50 text-indigo-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">🚚</span> Yurtiçi Kargo Takip No: YK-{order.id.slice(0, 8).toUpperCase()} (Dağıtıma Hazırlanıyor)
+                        </div>
+                      ) : order.status === 'TESLIM_EDILDI' ? (
+                        <div className="bg-emerald-900/30 border border-emerald-800/50 text-emerald-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">✅</span> Teslim Edildi
+                        </div>
+                      ) : (
+                        <div className="bg-slate-800/80 border border-slate-700 text-slate-400 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">⏳</span> Siparişiniz işleme alındı.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           ))}
