@@ -53,6 +53,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).supsisCartItems = cart.map(item => ({
+        productCode: item.product.code,
+        name: item.product.name,
+        quantity: item.quantity,
+        price: item.product.price
+      }));
+    }
+  }, [cart]);
+
+  useEffect(() => {
     fetchCart();
     
     // Supsis backend'i doğrudan sepeti güncellerse tarayıcının bunu otomatik fark etmesi için Polling (3 saniyede bir)
@@ -63,14 +74,13 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Supsis Chatbot Event Listener
+  // Supsis Chatbot Event Listeners
   useEffect(() => {
     const handleSupsisCartEvent = async (event: any) => {
       const { productCode, quantity } = event.detail || {};
       
       if (productCode) {
         try {
-          // Doğrudan API ile sepete ekle (Bu aynı zamanda session cookie de oluşturur)
           const res = await fetch('/api/cart/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -79,7 +89,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           
           if (res.ok) {
             console.log(`🤖 Supsis Bot: ${productCode} sepete eklendi!`);
-            fetchCart(); // Sepeti sunucudan güncelle
+            fetchCart();
             setIsCartOpen(true);
           }
         } catch (error) {
@@ -88,8 +98,25 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    // Sipariş tamamlandığında sepeti temizleme eventi
+    const handleOrderCompleted = async () => {
+      console.log('🤖 Supsis Bot: Sipariş tamamlandı, sepet temizleniyor!');
+      await fetch('/api/cart/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear' })
+      });
+      setCart([]);
+      setIsCartOpen(false);
+    };
+
     window.addEventListener('supsis:add-to-cart', handleSupsisCartEvent);
-    return () => window.removeEventListener('supsis:add-to-cart', handleSupsisCartEvent);
+    window.addEventListener('supsis:order-completed', handleOrderCompleted);
+    
+    return () => {
+      window.removeEventListener('supsis:add-to-cart', handleSupsisCartEvent);
+      window.removeEventListener('supsis:order-completed', handleOrderCompleted);
+    };
   }, []);
 
   const addToCart = async (product: Product, quantity = 1) => {

@@ -106,16 +106,35 @@ export async function POST(req: Request) {
       }
     }
 
-    // Eğer geçerli ürün bulunamadıysa VEYA liste boşsa: DUMMY 1 ADET ÜRÜN ATA
+    // Eğer webhook üzerinden ürün gelmediyse: KULLANICININ SEPETİNİ (CART) KULLAN
     if (orderItemsToCreate.length === 0) {
-      const dummyProduct = await prisma.product.findFirst();
-      if (dummyProduct) {
-        orderItemsToCreate.push({
-          productId: dummyProduct.id,
-          quantity: 1,
-          price: dummyProduct.price
-        });
-        totalAmount += dummyProduct.price;
+      const userCart = await prisma.cart.findFirst({
+        where: { userId: user.id },
+        orderBy: { updatedAt: 'desc' },
+        include: { items: { include: { product: true } } }
+      });
+
+      if (userCart && userCart.items.length > 0) {
+        for (const cartItem of userCart.items) {
+          orderItemsToCreate.push({
+            productId: cartItem.productId,
+            quantity: cartItem.quantity,
+            price: cartItem.product.price
+          });
+          totalAmount += (cartItem.product.price * cartItem.quantity);
+        }
+        console.log(`🛒 Supsis Webhook: Ürün bilgisi gelmediği için kullanıcının sepeti (${userCart.items.length} ürün) siparişe eklendi.`);
+      } else {
+        // Sepeti de boşsa son çare: DUMMY 1 ADET ÜRÜN ATA (Sistemi kırmamak için)
+        const dummyProduct = await prisma.product.findFirst();
+        if (dummyProduct) {
+          orderItemsToCreate.push({
+            productId: dummyProduct.id,
+            quantity: 1,
+            price: dummyProduct.price
+          });
+          totalAmount += dummyProduct.price;
+        }
       }
     }
 
@@ -146,6 +165,12 @@ export async function POST(req: Request) {
             where: { id: item.productId },
             data: { stock: { decrement: item.quantity } }
           });
+        }
+
+        // Sepeti temizle
+        const userCartToClear = await tx.cart.findFirst({ where: { userId: user.id } });
+        if (userCartToClear) {
+          await tx.cartItem.deleteMany({ where: { cartId: userCartToClear.id } });
         }
 
         return newOrder;
