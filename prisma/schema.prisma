@@ -47,6 +47,8 @@ model Order {
   address       String
   phone         String
   customerName  String
+  returnStatus  String      @default("NONE")
+  returnReason  String?
   orderItems    OrderItem[]
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt

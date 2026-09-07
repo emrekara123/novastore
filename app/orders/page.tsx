@@ -9,24 +9,72 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      try {
-        const res = await fetch('/api/orders');
-        if (res.ok) {
-          const data = await res.json();
-          setOrders(data.orders);
-        } else if (res.status === 401) {
-          router.push('/auth/login?redirect=/orders');
-        }
-      } catch (error) {
-        console.error('Error fetching orders:', error);
-      } finally {
-        setLoading(false);
+  // Return Modal State
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [selectedOrderForReturn, setSelectedOrderForReturn] = useState<any>(null);
+  const [returnReasonType, setReturnReasonType] = useState('Ürün Arızalı');
+  const [returnDescription, setReturnDescription] = useState('');
+  const [returnLoading, setReturnLoading] = useState(false);
+
+  const fetchOrders = async () => {
+    try {
+      const res = await fetch('/api/orders');
+      if (res.ok) {
+        const data = await res.json();
+        setOrders(data.orders);
+      } else if (res.status === 401) {
+        router.push('/auth/login?redirect=/orders');
       }
-    };
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchOrders();
   }, [router]);
+
+  const handleReturnSubmit = async () => {
+    if (!selectedOrderForReturn) return;
+    setReturnLoading(true);
+    
+    try {
+      const fullReason = `${returnReasonType}${returnDescription ? ' - ' + returnDescription : ''}`;
+      
+      const res = await fetch('/api/orders/return', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: selectedOrderForReturn.id,
+          phone: selectedOrderForReturn.phone,
+          reason: fullReason
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        alert(data.message);
+        setReturnModalOpen(false);
+        fetchOrders(); // Refresh orders to get updated returnStatus
+      } else {
+        alert(data.message || 'Bir hata oluştu.');
+      }
+    } catch (error) {
+      alert('Bağlantı hatası.');
+    } finally {
+      setReturnLoading(false);
+    }
+  };
+
+  const openReturnModal = (order: any) => {
+    setSelectedOrderForReturn(order);
+    setReturnReasonType('Ürün Arızalı');
+    setReturnDescription('');
+    setReturnModalOpen(true);
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -139,9 +187,9 @@ export default function OrdersPage() {
                 </ul>
               </div>
               
-              {/* Delivery Info and Cargo Status */}
+              {/* Delivery Info, Cargo Status and Return Action */}
               <div className="bg-slate-800/30 px-4 py-4 sm:px-6 border-t border-slate-800">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div>
                     <h4 className="text-sm font-medium text-white mb-2">Teslimat Bilgileri</h4>
                     <p className="text-sm text-slate-400">{order.customerName} - {order.phone}</p>
@@ -152,11 +200,11 @@ export default function OrdersPage() {
                     <div className="flex items-center">
                       {order.status === 'YENI' || order.status === 'HAZIRLANIYOR' ? (
                         <div className="bg-blue-900/30 border border-blue-800/50 text-blue-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
-                          <span className="mr-2.5 text-base">📦</span> Siparişiniz onaylandı, depoda paketleme sırasına alındı.
+                          <span className="mr-2.5 text-base">📦</span> Siparişiniz onaylandı, paketleme sırasına alındı.
                         </div>
                       ) : order.status === 'KARGODA' ? (
                         <div className="bg-indigo-900/30 border border-indigo-800/50 text-indigo-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
-                          <span className="mr-2.5 text-base">🚚</span> Yurtiçi Kargo Takip No: YK-{order.id.slice(0, 8).toUpperCase()} (Dağıtıma Hazırlanıyor)
+                          <span className="mr-2.5 text-base">🚚</span> YK-{order.id.slice(0, 8).toUpperCase()} (Dağıtıma Hazırlanıyor)
                         </div>
                       ) : order.status === 'TESLIM_EDILDI' ? (
                         <div className="bg-emerald-900/30 border border-emerald-800/50 text-emerald-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
@@ -169,10 +217,115 @@ export default function OrdersPage() {
                       )}
                     </div>
                   </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-white mb-2">İade & İptal</h4>
+                    <div className="flex items-center h-[42px]">
+                      {order.returnStatus === 'REQUESTED' ? (
+                        <div className="bg-amber-900/30 border border-amber-800/50 text-amber-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">⏳</span> İade Talebi İnceleniyor
+                        </div>
+                      ) : order.returnStatus === 'APPROVED' ? (
+                        <div className="bg-emerald-900/30 border border-emerald-800/50 text-emerald-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">✅</span> İade Onaylandı
+                        </div>
+                      ) : order.returnStatus === 'REJECTED' ? (
+                        <div className="bg-red-900/30 border border-red-800/50 text-red-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">❌</span> İade Reddedildi
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => openReturnModal(order)}
+                          className="w-full bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors border border-slate-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 focus:ring-offset-slate-900 flex justify-center items-center"
+                        >
+                          İade Talebi Oluştur
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Return Modal */}
+      {returnModalOpen && selectedOrderForReturn && (
+        <div className="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+          <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <div 
+              className="fixed inset-0 bg-black/75 transition-opacity" 
+              aria-hidden="true"
+              onClick={() => !returnLoading && setReturnModalOpen(false)}
+            ></div>
+
+            <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+            <div className="inline-block align-bottom bg-slate-900 rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg w-full border border-slate-700">
+              <div className="bg-slate-900 px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div className="sm:flex sm:items-start">
+                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-amber-900/50 sm:mx-0 sm:h-10 sm:w-10">
+                    <svg className="h-6 w-6 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                    </svg>
+                  </div>
+                  <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                    <h3 className="text-lg leading-6 font-medium text-white" id="modal-title">
+                      İade Talebi Oluştur
+                    </h3>
+                    <div className="mt-2">
+                      <p className="text-sm text-slate-400">
+                        <strong>{selectedOrderForReturn.orderNumber}</strong> numaralı siparişiniz için iade nedenini seçiniz.
+                      </p>
+                      
+                      <div className="mt-4">
+                        <label className="block text-sm font-medium text-slate-300 mb-1">İade Nedeni</label>
+                        <select 
+                          value={returnReasonType}
+                          onChange={(e) => setReturnReasonType(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          <option value="Ürün Arızalı">Ürün Arızalı</option>
+                          <option value="Yanlış Ürün Geldi">Yanlış Ürün Geldi</option>
+                          <option value="Beğenmedim / Vazgeçtim">Beğenmedim / Vazgeçtim</option>
+                          <option value="Diğer">Diğer</option>
+                        </select>
+                      </div>
+
+                      <div className="mt-4">
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Ek Açıklama (İsteğe Bağlı)</label>
+                        <textarea 
+                          value={returnDescription}
+                          onChange={(e) => setReturnDescription(e.target.value)}
+                          placeholder="Lütfen iade talebinizle ilgili detayları belirtiniz..."
+                          rows={3}
+                          className="w-full bg-slate-800 border border-slate-700 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-slate-800 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button
+                  type="button"
+                  onClick={handleReturnSubmit}
+                  disabled={returnLoading}
+                  className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white sm:ml-3 sm:w-auto sm:text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-indigo-500 ${returnLoading ? 'bg-indigo-800 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                >
+                  {returnLoading ? 'Gönderiliyor...' : 'Talebi Gönder'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReturnModalOpen(false)}
+                  disabled={returnLoading}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-slate-600 shadow-sm px-4 py-2 bg-slate-800 text-base font-medium text-slate-300 hover:bg-slate-700 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-slate-500"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
