@@ -3,49 +3,102 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function POST(req: Request) {
   try {
-    const { orderId, phone, reason } = await req.json();
-
-    if (!orderId || !phone || !reason) {
-      return NextResponse.json({ success: false, message: 'Lütfen sipariş ID, telefon ve iade nedeni bilgilerini eksiksiz girin.' }, { status: 400 });
+    let body: any = {};
+    
+    // Güvenli gövde okuma
+    try {
+      body = await req.json();
+    } catch (e) {
+      const textBody = await req.text();
+      try {
+        body = JSON.parse(textBody);
+      } catch (err) {
+        body = {};
+      }
     }
 
-    // Verify order exists
-    const order = await prisma.order.findUnique({
-      where: { id: orderId }
+    console.log("\n📦 👉 SUPSIS RETURN REQUEST GELDİ:", body);
+
+    let { orderId, phone, reason, imageUrl } = body;
+
+    // Eğer parametreler eksikse hata dön
+    if (!orderId || !phone || !reason) {
+      console.log("❌ Eksik parametre.");
+      return NextResponse.json({ success: false, message: 'Lütfen sipariş ID/No, telefon ve iade nedeni bilgilerini eksiksiz girin.' }, { status: 200, headers: corsHeaders });
+    }
+
+    console.log("🔎 Aranacak Sipariş Parametreleri:", { orderId, phone, reason });
+
+    // 1. Siparişi Veritabanında Bul (id veya orderNumber)
+    const order = await prisma.order.findFirst({
+      where: {
+        OR: [
+          { orderNumber: String(orderId).trim() },
+          { id: String(orderId).trim() }
+        ]
+      }
     });
 
     if (!order) {
-      return NextResponse.json({ success: false, message: 'Sipariş bulunamadı.' }, { status: 404 });
+      console.log(`❌ Sipariş Bulunamadı! (Aranan orderId: ${orderId})`);
+      // Supsis bot akışı patlamasın diye hata mesajını 200 ile dönüyoruz.
+      return NextResponse.json({ success: false, message: `Sipariş sistemde bulunamadı: ${orderId}` }, { status: 200, headers: corsHeaders });
     }
 
-    // Müşteri güvenliği: Siparişteki telefonla doğrulama yap (boşlukları temizleyerek)
-    if (order.phone.replace(/\s+/g, '') !== phone.replace(/\s+/g, '')) {
-      return NextResponse.json({ success: false, message: 'Girilen telefon numarası siparişteki telefon numarasıyla eşleşmiyor.' }, { status: 403 });
+    // 2. Esnek Telefon Kontrolü (Sadece son 10 haneyi kontrol et)
+    const normalizePhone = (p: string) => {
+      const cleaned = String(p).replace(/\D/g, ''); // Sadece rakamları bırak (boşluk, +90, vs. gider)
+      return cleaned.slice(-10); // Sadece son 10 hanesini al (örn: 5426104349)
+    };
+
+    const incomingPhone = normalizePhone(phone);
+    const dbPhone = normalizePhone(order.phone);
+
+    console.log("☎️ Telefon Karşılaştırma:", { incoming: incomingPhone, db: dbPhone });
+
+    if (incomingPhone !== dbPhone) {
+      console.log(`❌ Telefon Eşleşmedi! Gelen: ${incomingPhone}, DB: ${dbPhone}`);
+      return NextResponse.json({ success: false, message: 'Girdiğiniz telefon numarası siparişin sahibiyle eşleşmiyor.' }, { status: 200, headers: corsHeaders });
     }
 
+    // 3. Mükerrer İade Kontrolü
     if (order.returnStatus !== 'NONE') {
-      return NextResponse.json({ success: false, message: 'Bu sipariş için zaten bir iade talebi bulunuyor.' }, { status: 400 });
+      console.log(`⚠️ Bu sipariş için zaten iade kaydı var (Durum: ${order.returnStatus}).`);
+      return NextResponse.json({ success: false, message: 'Bu siparişiniz için halihazırda alınmış bir iade talebi bulunmaktadır.' }, { status: 200, headers: corsHeaders });
     }
 
-    // Update the order
+    // 4. Veritabanını Güncelle
     await prisma.order.update({
-      where: { id: orderId },
+      where: { id: order.id },
       data: {
-        returnStatus: 'REQUESTED',
-        returnReason: reason
+        returnStatus: 'REQUESTED', // Frontend kodumuz bu durumu okuyor ("İade Talebi İnceleniyor" badge'i için)
+        returnReason: reason,
+        returnImageUrl: imageUrl || null // Şemaya eklediğimiz yeni opsiyonel alan
       }
     });
+
+    console.log("✅ İade Talebi Başarıyla Oluşturuldu:", order.orderNumber);
 
     return NextResponse.json({ 
       success: true, 
       message: "İade talebiniz başarıyla alındı. 2 iş günü içinde incelenecektir.", 
-      returnCode: "RET-" + orderId.slice(0, 8).toUpperCase()
-    }, { status: 200 });
+      returnCode: "RET-" + order.orderNumber.replace('ORD-', '').replace('SUP-', '')
+    }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('Return Request Error:', error);
-    return NextResponse.json({ success: false, message: 'Sunucu hatası oluştu.' }, { status: 500 });
+    console.error('❌ Return Request Fatal Error:', error);
+    return NextResponse.json({ success: false, message: 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.' }, { status: 200, headers: corsHeaders });
   }
 }
