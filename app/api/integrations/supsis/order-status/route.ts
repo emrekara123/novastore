@@ -82,16 +82,33 @@ export async function POST(req: Request) {
       'IPTAL': 'İptal Edildi'
     };
 
-    const translatedStatus = statusMap[order.status] || order.status;
-    const productName = order.orderItems?.[0]?.product?.name || "Ürün";
+    const translatedStatus = String(statusMap[order.status] || order.status);
+    const productName = String(order.orderItems?.[0]?.product?.name || "Ürün");
 
+    // Tarihi DD.MM.YYYY formatında oluşturma
+    const orderDate = new Date(order.createdAt);
+    const dateStr = String(`${String(orderDate.getDate()).padStart(2, '0')}.${String(orderDate.getMonth() + 1).padStart(2, '0')}.${orderDate.getFullYear()}`);
+
+    // Kargo detay simülasyonu
+    let cargoDetails = "Siparişiniz işleme alındı.";
+    if (translatedStatus === "Sipariş Alındı" || translatedStatus === "Hazırlanıyor") {
+      cargoDetails = "Siparişiniz onaylandı, depoda paketleme sırasına alındı.";
+    } else if (translatedStatus === "Kargoya Verildi") {
+      cargoDetails = `Yurtiçi Kargo Takip No: YK-${String(order.id).slice(0, 8).toUpperCase()} (Aktarma Merkezinde, Dağıtıma Hazırlanıyor)`;
+    } else if (translatedStatus === "Teslim Edildi") {
+      cargoDetails = "Siparişiniz teslim edilmiştir.";
+    }
+
+    // Supsis tarafında array ("[...] ") sorunu olmaması için her şeyi düz string olarak dönüyoruz
     return NextResponse.json({
       found: true,
-      orderNumber: order.orderNumber,
+      orderNumber: String(order.orderNumber),
       status: translatedStatus,
-      paymentMethod: order.paymentMethod,
-      total: `${order.totalAmount} ₺`,
-      productName: productName
+      paymentMethod: String(order.paymentMethod),
+      total: String(`${order.totalAmount} ₺`),
+      productName: productName,
+      date: dateStr,
+      cargoDetails: cargoDetails
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
