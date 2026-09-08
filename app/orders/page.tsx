@@ -69,6 +69,35 @@ export default function OrdersPage() {
     }
   };
 
+  const handleCancelOrder = async (order: any) => {
+    if (!window.confirm('Siparişinizi iptal etmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) {
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/orders/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          phone: order.phone,
+          reason: 'Kullanıcı tarafından panelden iptal edildi.'
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        alert(data.message);
+        fetchOrders();
+      } else {
+        alert(data.message || 'Bir hata oluştu.');
+      }
+    } catch (error) {
+      alert('Bağlantı hatası.');
+    }
+  };
+
   const openReturnModal = (order: any) => {
     setSelectedOrderForReturn(order);
     setReturnReasonType('Ürün Arızalı');
@@ -232,6 +261,17 @@ export default function OrdersPage() {
                         <div className="bg-red-900/30 border border-red-800/50 text-red-300 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
                           <span className="mr-2.5 text-base">❌</span> İade Reddedildi
                         </div>
+                      ) : order.status === 'IPTAL' ? (
+                        <div className="bg-slate-800/80 border border-slate-700 text-slate-400 text-sm px-3 py-2.5 rounded-lg flex items-center w-full">
+                          <span className="mr-2.5 text-base">⛔</span> Sipariş İptal Edildi
+                        </div>
+                      ) : order.status === 'YENI' || order.status === 'HAZIRLANIYOR' ? (
+                        <button 
+                          onClick={() => handleCancelOrder(order)}
+                          className="w-full bg-red-900/40 hover:bg-red-800/60 text-red-300 text-sm font-medium px-4 py-2.5 rounded-lg transition-colors border border-red-800/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 focus:ring-offset-slate-900 flex justify-center items-center"
+                        >
+                          Siparişi İptal Et
+                        </button>
                       ) : (
                         <button 
                           onClick={() => openReturnModal(order)}
